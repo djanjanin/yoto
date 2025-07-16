@@ -8,7 +8,7 @@ const YOTO_CLIENT_ID = "uJ6QBRcivojvQT2B7EpvIyXnrJHU1r0p";
     e.g. https://username.github.io/repo/                         */
 const REDIRECT_URI = window.location.origin + window.location.pathname; // works on GH-Pages
 
-const AUTH_BASE = "https://auth.yoto.com";
+const AUTH_BASE = "https://login.yotoplay.com";
 const TOKEN_ENDPOINT = `${AUTH_BASE}/oauth/token`;
 const AUTHORIZE_ENDPOINT = `${AUTH_BASE}/oauth/authorize`;
 
