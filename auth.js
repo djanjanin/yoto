@@ -15,9 +15,9 @@ const AUTHORIZE_ENDPOINT = `${AUTH_BASE}/oauth/authorize`;
 const LS_KEY = "yoto_oauth";
 
 /* ---------- Debug helper ---------- */
-const DEBUG = true;
+const DEBUG_AUTH = true;
 function dbg(...args) {
-  if (DEBUG) console.log(...args);
+  if (DEBUG_AUTH) console.log(...args);
 }
 
 /* ---------- PKCE helpers ---------- */
