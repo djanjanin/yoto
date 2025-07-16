@@ -2,7 +2,7 @@
    Main UI + MQTT logic for Yoto Matrix Preview
    --------------------------------------------------------- */
 
-const API_ME = "https://api.prod.yoto.com/v1/consumers/me";
+const API_ME = "https://api.yotoplay.com/device-v2/devices/mine";
 const PALETTE_COLORS = [
   "#000000",
   "#ffffff",
@@ -47,17 +47,18 @@ window.addEventListener("load", async () => {
 
   status("Fetching device info...");
   try {
-    const me = await fetch(API_ME, {
+    const res = await fetch(API_ME, {
       headers: { Authorization: `Bearer ${token}` },
-    }).then((r) => r.json());
+    });
+    const { devices } = await res.json();
 
-    if (!me.players || me.players.length === 0) {
+    if (!devices || devices.length === 0) {
       status("No devices found on your account");
       return;
     }
-    const player = me.players[0];
-    deviceUuid = player.uuid;
-    const mqttCreds = player.mqtt;
+    const device = devices[0];
+    deviceUuid = device.deviceId;
+    const mqttCreds = device.mqtt;
 
     await connectMqtt(mqttCreds);
     buildPalette();
