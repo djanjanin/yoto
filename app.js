@@ -20,6 +20,12 @@ const PALETTE_COLORS = [
 
 const GRID_SIZE = 16; // 16×16
 const CELL_PX = 20; // canvas scaling
+
+/* ---------- Debug helper ---------- */
+const DEBUG = true;
+function dbg(...args) {
+  if (DEBUG) console.log(...args);
+}
 let currentColour = PALETTE_COLORS[2]; // default red
 let pixelData = new Array(GRID_SIZE * GRID_SIZE).fill("#000000"); // hex strings
 let deviceUuid = null;
@@ -51,12 +57,14 @@ window.addEventListener("load", async () => {
       headers: { Authorization: `Bearer ${token}` },
     });
     const { devices } = await res.json();
+    dbg("Devices array", devices);
 
     if (!devices || devices.length === 0) {
       status("No devices found on your account");
       return;
     }
     const device = devices[0];
+    dbg("Selected device", device);
     deviceUuid = device.deviceId;
     const mqttCreds = device.mqtt;
 

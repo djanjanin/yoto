@@ -14,6 +14,12 @@ const AUTHORIZE_ENDPOINT = `${AUTH_BASE}/oauth/authorize`;
 
 const LS_KEY = "yoto_oauth";
 
+/* ---------- Debug helper ---------- */
+const DEBUG = true;
+function dbg(...args) {
+  if (DEBUG) console.log(...args);
+}
+
 /* ---------- PKCE helpers ---------- */
 function randomString(len = 64) {
   const array = new Uint8Array(len);
@@ -57,6 +63,7 @@ async function startAuth() {
     scope: "openid profile offline_access",
   });
 
+  dbg("OAuth redirect URL", `${AUTHORIZE_ENDPOINT}?${params.toString()}`);
   window.location.href = `${AUTHORIZE_ENDPOINT}?${params.toString()}`;
 }
 
@@ -64,6 +71,7 @@ async function startAuth() {
 async function completeAuth() {
   const url = new URL(window.location.href);
   const code = url.searchParams.get("code");
+  dbg("OAuth returned code", code);
   if (!code) return false; // nothing to do
 
   const codeVerifier = sessionStorage.getItem("pkce_code_verifier");
@@ -92,6 +100,7 @@ async function completeAuth() {
   }
 
   const data = await res.json();
+  dbg("Token response", data);
   storeTokens(data);
 
   // clean up URL
