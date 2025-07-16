@@ -137,7 +137,7 @@ sendBtn.addEventListener("click", () => {
 function connectMqtt(creds) {
   return new Promise((resolve, reject) => {
     status("Connecting to MQTT...");
-    mqttClient = mqtt.connect("wss://mqtt.prod.yoto.com:443/mqtt", {
+    mqttClient = mqtt.connect("wss://aqrphjqbp3u2z-ats.iot.eu-west-2.amazonaws.com:443", {
       username: creds.username,
       password: creds.password,
       clientId: creds.clientId,
