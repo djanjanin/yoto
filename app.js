@@ -36,6 +36,7 @@ let currentAlpha = 255; // 0-255
 let pixelData = new Array(GRID_SIZE * GRID_SIZE).fill("#000000FF"); // 8-digit hex #RRGGBBAA
 let deviceId = null;
 let mqttClient = null;
+let isDragging = false;
 
 /* ---------- DOM refs ---------- */
 const loginBtn = document.getElementById("loginBtn");
@@ -149,15 +150,59 @@ function initAlphaSlider() {
   });
 }
 
-gridCanvas.addEventListener("click", (e) => {
+function getCellCoords(e) {
   const rect = gridCanvas.getBoundingClientRect();
-  const x = Math.floor((e.clientX - rect.left) / CELL_PX);
-  const y = Math.floor((e.clientY - rect.top) / CELL_PX);
+  const clientX = e.clientX || (e.touches && e.touches[0].clientX) || 0;
+  const clientY = e.clientY || (e.touches && e.touches[0].clientY) || 0;
+  const x = Math.floor((clientX - rect.left) / CELL_PX);
+  const y = Math.floor((clientY - rect.top) / CELL_PX);
+  return { x, y };
+}
 
+function handlePaint(e) {
+  const { x, y } = getCellCoords(e);
   if (x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE) return;
-
   setPixel(x, y);
   drawCell(x, y);
+}
+
+// Mouse events
+gridCanvas.addEventListener("mousedown", (e) => {
+  isDragging = true;
+  handlePaint(e);
+  dbg("Drag start (mouse)");
+});
+
+gridCanvas.addEventListener("mousemove", (e) => {
+  if (isDragging) handlePaint(e);
+});
+
+gridCanvas.addEventListener("mouseup", () => {
+  isDragging = false;
+  dbg("Drag end (mouse)");
+});
+
+gridCanvas.addEventListener("mouseleave", () => {
+  isDragging = false;
+});
+
+// Touch events
+gridCanvas.addEventListener("touchstart", (e) => {
+  e.preventDefault();
+  isDragging = true;
+  handlePaint(e);
+  dbg("Drag start (touch)");
+});
+
+gridCanvas.addEventListener("touchmove", (e) => {
+  e.preventDefault();
+  if (isDragging) handlePaint(e);
+});
+
+gridCanvas.addEventListener("touchend", (e) => {
+  e.preventDefault();
+  isDragging = false;
+  dbg("Drag end (touch)");
 });
 
 function setPixel(x, y) {
