@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Yoto Matrix Preview</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+
+  <body>
+    <h1>Yoto Matrix Preview</h1>
+
+    <!-- Visible only when no valid access token -->
+    <button id="loginBtn" class="hidden">Log in with Yoto</button>
+
+    <!-- Main application UI (hidden until device + MQTT ready) -->
+    <div id="app" class="hidden">
+      <select id="deviceSelect" class="hidden"></select>
+      <button id="connectBtn" class="hidden">Connect to Device</button>
+      <div id="palette"></div>
+      <div id="alphaContainer">
+        Alpha: <input type="range" id="alphaSlider" min="0" max="255" value="255">
+        <span id="alphaValue">255</span>
+      </div>
+      <canvas id="grid" width="320" height="320"></canvas>
+      <button id="sendBtn">Send to Device</button>
+      <p id="status"></p>
+    </div>
+
+    <!-- mqtt.js browser bundle -->
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <!-- Authentication + App logic -->
+    <script src="auth.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
