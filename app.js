@@ -237,12 +237,7 @@ sendBtn.addEventListener("click", async () => {
     smallCanvas.height = GRID_SIZE;
     const smallCtx = smallCanvas.getContext("2d");
 
-    for (let y = 0; y < GRID_SIZE; y++) {
-      for (let x = 0; x < GRID_SIZE; x++) {
-        smallCtx.fillStyle = pixelData[y * GRID_SIZE + x];
-        smallCtx.fillRect(x, y, 1, 1);
-      }
-    }
+    smallCtx.drawImage(gridCanvas, 0, 0, gridCanvas.width, gridCanvas.height, 0, 0, smallCanvas.width, smallCanvas.height);
 
     const base64 = smallCanvas.toDataURL("image/png").split(",")[1];
 
