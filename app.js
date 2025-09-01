@@ -75,7 +75,40 @@ window.addEventListener("load", async () => {
       return;
     }
 
-    // Populate device select
+    // Helper function to show editor UI after connection
+    async function connectAndShowEditor(selectedDevice) {
+      deviceId = selectedDevice.deviceId;
+      status(`Connecting to ${selectedDevice.name}...`);
+      await connectMqtt(token, deviceId);
+      deviceSelect.classList.add("hidden");
+      connectBtn.classList.add("hidden");
+      paletteDiv.style.display = "flex";
+      alphaSlider.parentElement.style.display = "flex";
+      gridCanvas.style.display = "block";
+      sendBtn.style.display = "block";
+      buildPalette();
+      initAlphaSlider();
+      drawFullGrid();
+      status("Connected. Ready!");
+    }
+
+    // Helper function for device switch
+    async function handleDeviceSwitch() {
+      const newId = deviceSelect.value;
+      if (newId === deviceId) return;
+
+      const newDevice = devices.find(d => d.deviceId === newId);
+      if (!newDevice.online) {
+        status("Selected device is offline");
+        deviceSelect.value = deviceId;
+        return;
+      }
+
+      if (mqttClient) mqttClient.end();
+      await connectAndShowEditor(newDevice);
+    }
+
+    // Populate dropdown
     devices.forEach((d) => {
       const option = document.createElement("option");
       option.value = d.deviceId;
@@ -83,11 +116,33 @@ window.addEventListener("load", async () => {
       deviceSelect.appendChild(option);
     });
 
-    // Show select and connect button
-    deviceSelect.classList.remove("hidden");
-    connectBtn.classList.remove("hidden");
-    appDiv.classList.remove("hidden");
+    const onlineDevices = devices.filter(d => d.online);
+    const hasMultipleDevices = devices.length > 1;
 
+    if (!hasMultipleDevices) {
+      // Single device case
+      const singleDevice = devices[0];
+      if (singleDevice.online) {
+        await connectAndShowEditor(singleDevice);
+      } else {
+        deviceSelect.classList.remove("hidden");
+        connectBtn.classList.remove("hidden");
+      }
+    } else {
+      // Multiple devices case
+      deviceSelect.classList.remove("hidden");
+
+      if (onlineDevices.length > 0) {
+        const firstOnline = onlineDevices[0];
+        deviceSelect.value = firstOnline.deviceId;
+        await connectAndShowEditor(firstOnline);
+        deviceSelect.onchange = handleDeviceSwitch;
+      } else {
+        connectBtn.classList.remove("hidden");
+      }
+    }
+
+    // Manual connect button handler
     connectBtn.onclick = async () => {
       const selectedId = deviceSelect.value;
       if (!selectedId) {
@@ -101,24 +156,10 @@ window.addEventListener("load", async () => {
         return;
       }
 
-      deviceId = selectedId;
-      dbg("Selected device", selectedDevice);
-
-      await connectMqtt(token, deviceId);
-
-      // Hide select/connect, show editor
-      deviceSelect.classList.add("hidden");
-      connectBtn.classList.add("hidden");
-      paletteDiv.style.display = "flex";
-      alphaSlider.parentElement.style.display = "flex";
-      gridCanvas.style.display = "block";
-      sendBtn.style.display = "block";
-
-      buildPalette();
-      initAlphaSlider();
-      drawFullGrid();
-      status("Connected. Ready!");
+      await connectAndShowEditor(selectedDevice);
     };
+
+    appDiv.classList.remove("hidden");
   } catch (err) {
     console.error(err);
     status("Error fetching device info – see console");
