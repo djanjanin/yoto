@@ -5,6 +5,10 @@ const KEEPALIVE = 300;
 
 const GRID_SIZE = 16;
 const CELL_PX = 20;
+const PREVIEW_INSET = 34;
+const CELL_GAP = 2;
+const CELL_RADIUS = 4;
+const DISPLAY_BG_RGB = { r: 138, g: 143, b: 149 };
 const PALETTE_COLORS = [
   "#000000",
   "#ffffff",
@@ -352,9 +356,14 @@ function getCellCoords(e) {
   const rect = gridCanvas.getBoundingClientRect();
   const clientX = e.clientX || (e.touches && e.touches[0]?.clientX) || 0;
   const clientY = e.clientY || (e.touches && e.touches[0]?.clientY) || 0;
+  const scaleX = gridCanvas.width / rect.width;
+  const scaleY = gridCanvas.height / rect.height;
+  const canvasX = (clientX - rect.left) * scaleX;
+  const canvasY = (clientY - rect.top) * scaleY;
+  const { inset, cellSize } = getPreviewMetrics();
   return {
-    x: Math.floor((clientX - rect.left) / CELL_PX),
-    y: Math.floor((clientY - rect.top) / CELL_PX),
+    x: Math.floor((canvasX - inset) / cellSize),
+    y: Math.floor((canvasY - inset) / cellSize),
   };
 }
 
@@ -371,11 +380,24 @@ function setPixel(x, y) {
 }
 
 function drawCell(x, y) {
-  ctx.fillStyle = pixelData[y * GRID_SIZE + x];
-  ctx.fillRect(x * CELL_PX, y * CELL_PX, CELL_PX, CELL_PX);
+  const { inset, cellSize } = getPreviewMetrics();
+  const left = inset + x * cellSize;
+  const top = inset + y * cellSize;
+  const size = cellSize - CELL_GAP;
+  const gapInset = CELL_GAP / 2;
+  const color = getDisplayColor(pixelData[y * GRID_SIZE + x]);
+
+  ctx.fillStyle = rgbToCss(DISPLAY_BG_RGB);
+  ctx.fillRect(left, top, cellSize, cellSize);
+
+  ctx.fillStyle = color;
+  drawRoundedRect(left + gapInset, top + gapInset, size, size, CELL_RADIUS);
+  ctx.fill();
 }
 
 function drawFullGrid() {
+  ctx.fillStyle = rgbToCss(DISPLAY_BG_RGB);
+  ctx.fillRect(0, 0, gridCanvas.width, gridCanvas.height);
   for (let y = 0; y < GRID_SIZE; y += 1) {
     for (let x = 0; x < GRID_SIZE; x += 1) {
       drawCell(x, y);
@@ -383,22 +405,68 @@ function drawFullGrid() {
   }
 }
 
+function getPreviewMetrics() {
+  const inset = PREVIEW_INSET;
+  const cellSize = (gridCanvas.width - inset * 2) / GRID_SIZE;
+  return { inset, cellSize };
+}
+
+function getDisplayColor(hex) {
+  const raw = hexToRgba(hex);
+
+  // Black pixels should visually match the grey Yoto panel.
+  if (raw.r === 0 && raw.g === 0 && raw.b === 0) {
+    return rgbToCss(DISPLAY_BG_RGB);
+  }
+
+  // Composite alpha over the panel background first.
+  const composited = {
+    r: Math.round(raw.r * raw.a + DISPLAY_BG_RGB.r * (1 - raw.a)),
+    g: Math.round(raw.g * raw.a + DISPLAY_BG_RGB.g * (1 - raw.a)),
+    b: Math.round(raw.b * raw.a + DISPLAY_BG_RGB.b * (1 - raw.a)),
+  };
+
+  // Wash out/mute colors by blending further toward panel grey.
+  const mutedMix = 0.55;
+  const muted = {
+    r: Math.round(composited.r * (1 - mutedMix) + DISPLAY_BG_RGB.r * mutedMix),
+    g: Math.round(composited.g * (1 - mutedMix) + DISPLAY_BG_RGB.g * mutedMix),
+    b: Math.round(composited.b * (1 - mutedMix) + DISPLAY_BG_RGB.b * mutedMix),
+  };
+
+  return rgbToCss(muted);
+}
+
+function hexToRgba(hex) {
+  const v = hex.replace("#", "");
+  const r = parseInt(v.slice(0, 2), 16);
+  const g = parseInt(v.slice(2, 4), 16);
+  const b = parseInt(v.slice(4, 6), 16);
+  const a = parseInt(v.slice(6, 8), 16) / 255;
+  return { r, g, b, a: Number.isNaN(a) ? 1 : a };
+}
+
+function rgbToCss({ r, g, b }) {
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+function drawRoundedRect(x, y, w, h, r) {
+  const radius = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, radius);
+}
+
 async function renderIconBlob() {
   const smallCanvas = document.createElement("canvas");
   smallCanvas.width = GRID_SIZE;
   smallCanvas.height = GRID_SIZE;
   const smallCtx = smallCanvas.getContext("2d");
-  smallCtx.drawImage(
-    gridCanvas,
-    0,
-    0,
-    gridCanvas.width,
-    gridCanvas.height,
-    0,
-    0,
-    smallCanvas.width,
-    smallCanvas.height
-  );
+  for (let y = 0; y < GRID_SIZE; y += 1) {
+    for (let x = 0; x < GRID_SIZE; x += 1) {
+      smallCtx.fillStyle = pixelData[y * GRID_SIZE + x];
+      smallCtx.fillRect(x, y, 1, 1);
+    }
+  }
 
   return new Promise((resolve, reject) => {
     smallCanvas.toBlob((blob) => {

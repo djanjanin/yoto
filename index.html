@@ -36,7 +36,18 @@
           <input type="range" id="alphaSlider" min="0" max="255" value="255" />
           <span id="alphaValue">255</span>
         </div>
-        <canvas id="grid" width="320" height="320"></canvas>
+        <div class="player-mock">
+          <div class="player-ear player-ear-left" aria-hidden="true"></div>
+          <div class="player-ear player-ear-right" aria-hidden="true"></div>
+          <div class="player-screen-wrap">
+            <canvas id="grid" width="320" height="320"></canvas>
+          </div>
+          <div class="player-side-button" aria-hidden="true"></div>
+          <div class="player-feet" aria-hidden="true">
+            <span class="foot foot-left"></span>
+            <span class="foot foot-right"></span>
+          </div>
+        </div>
         <div class="actions">
           <button id="sendBtn">Send Display Preview</button>
         </div>
