@@ -80,7 +80,9 @@ window.addEventListener("load", async () => {
       deviceId = selectedDevice.deviceId;
       status(`Connecting to ${selectedDevice.name}...`);
       await connectMqtt(token, deviceId);
-      deviceSelect.classList.add("hidden");
+      if (!hasMultipleDevices) {
+        deviceSelect.classList.add("hidden");
+      }
       connectBtn.classList.add("hidden");
       paletteDiv.style.display = "flex";
       alphaSlider.parentElement.style.display = "flex";
