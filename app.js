@@ -1,12 +1,10 @@
-/* ---------------------------------------------------------
-   Main UI + MQTT logic for Yoto Matrix Preview
-   --------------------------------------------------------- */
-
 const API_ME = "https://api.yotoplay.com/device-v2/devices/mine";
+const ICON_UPLOAD_URL = "https://api.yotoplay.com/media/displayIcons/user/me/upload";
 const MQTT_URL = "wss://aqrphjqbp3u2z-ats.iot.eu-west-2.amazonaws.com";
 const KEEPALIVE = 300;
-const ICON_UPLOAD_URL = "https://api.yotoplay.com/media/displayIcons/user/me/upload";
 
+const GRID_SIZE = 16;
+const CELL_PX = 20;
 const PALETTE_COLORS = [
   "#000000",
   "#ffffff",
@@ -22,33 +20,71 @@ const PALETTE_COLORS = [
   "#964B00",
 ];
 
-const GRID_SIZE = 16; // 16×16
-const CELL_PX = 20; // canvas scaling
-
-let currentRGB = PALETTE_COLORS[2]; // default red
-let currentAlpha = 255; // 0-255
-let pixelData = new Array(GRID_SIZE * GRID_SIZE).fill("#000000FF"); // 8-digit hex #RRGGBBAA
+let accessToken = null;
 let deviceId = null;
 let mqttClient = null;
-let accessToken = null;
+let devices = [];
+let hasMultipleDevices = false;
+
+let currentRGB = PALETTE_COLORS[2];
+let currentAlpha = 255;
+let pixelData = new Array(GRID_SIZE * GRID_SIZE).fill("#000000FF");
 let isDragging = false;
 
-/* ---------- DOM refs ---------- */
 const loginBtn = document.getElementById("loginBtn");
 const appDiv = document.getElementById("app");
+const statusP = document.getElementById("status");
 const deviceSelect = document.getElementById("deviceSelect");
 const connectBtn = document.getElementById("connectBtn");
+const refreshStatusBtn = document.getElementById("refreshStatusBtn");
+const refreshEventsBtn = document.getElementById("refreshEventsBtn");
+
 const paletteDiv = document.getElementById("palette");
 const alphaSlider = document.getElementById("alphaSlider");
 const alphaValue = document.getElementById("alphaValue");
 const gridCanvas = document.getElementById("grid");
 const ctx = gridCanvas.getContext("2d");
 const sendBtn = document.getElementById("sendBtn");
-const statusP = document.getElementById("status");
 
-/* ---------- Init Flow ---------- */
-window.addEventListener("load", async () => {
-  await auth.completeAuth(); // handle ?code=
+const volumeSlider = document.getElementById("volumeSlider");
+const volumeValue = document.getElementById("volumeValue");
+const setVolumeBtn = document.getElementById("setVolumeBtn");
+const sleepSeconds = document.getElementById("sleepSeconds");
+const setSleepBtn = document.getElementById("setSleepBtn");
+const clearSleepBtn = document.getElementById("clearSleepBtn");
+const ambientColor = document.getElementById("ambientColor");
+const setAmbientBtn = document.getElementById("setAmbientBtn");
+
+const cardUri = document.getElementById("cardUri");
+const chapterKey = document.getElementById("chapterKey");
+const trackKey = document.getElementById("trackKey");
+const secondsIn = document.getElementById("secondsIn");
+const cutOff = document.getElementById("cutOff");
+const anyButtonStop = document.getElementById("anyButtonStop");
+const cardStartBtn = document.getElementById("cardStartBtn");
+const cardPauseBtn = document.getElementById("cardPauseBtn");
+const cardResumeBtn = document.getElementById("cardResumeBtn");
+const cardStopBtn = document.getElementById("cardStopBtn");
+
+const bluetoothOnPayload = document.getElementById("bluetoothOnPayload");
+const bluetoothConnectPayload = document.getElementById("bluetoothConnectPayload");
+const bluetoothOnBtn = document.getElementById("bluetoothOnBtn");
+const bluetoothOffBtn = document.getElementById("bluetoothOffBtn");
+const bluetoothStateBtn = document.getElementById("bluetoothStateBtn");
+const bluetoothConnectBtn = document.getElementById("bluetoothConnectBtn");
+const bluetoothDisconnectBtn = document.getElementById("bluetoothDisconnectBtn");
+const bluetoothDeleteBondsBtn = document.getElementById("bluetoothDeleteBondsBtn");
+
+const rebootBtn = document.getElementById("rebootBtn");
+
+const eventsJson = document.getElementById("eventsJson");
+const statusJson = document.getElementById("statusJson");
+const responseJson = document.getElementById("responseJson");
+
+window.addEventListener("load", init);
+
+async function init() {
+  await auth.completeAuth();
   accessToken = await auth.getValidAccessToken();
 
   if (!accessToken) {
@@ -57,113 +93,245 @@ window.addEventListener("load", async () => {
     return;
   }
 
-  status("Fetching device info...");
-  try {
-    const res = await fetch(API_ME, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    const { devices } = await res.json();
+  appDiv.classList.remove("hidden");
+  setupEditor();
+  setupControls();
 
-    if (!devices || devices.length === 0) {
-      status("No devices found on your account");
+  try {
+    await loadDevices();
+  } catch (err) {
+    console.error(err);
+    status("Error fetching devices - see console");
+  }
+}
+
+async function loadDevices() {
+  status("Fetching devices...");
+  const res = await fetch(API_ME, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const body = await res.json();
+
+  if (!res.ok) {
+    throw new Error(`Device fetch failed: ${res.status} ${JSON.stringify(body)}`);
+  }
+
+  devices = body.devices || [];
+  hasMultipleDevices = devices.length > 1;
+
+  if (devices.length === 0) {
+    status("No devices found on your account");
+    return;
+  }
+
+  deviceSelect.innerHTML = "";
+  devices.forEach((d) => {
+    const option = document.createElement("option");
+    option.value = d.deviceId;
+    option.textContent = `${d.name} (${d.online ? "Online" : "Offline"})`;
+    deviceSelect.appendChild(option);
+  });
+
+  const firstOnline = devices.find((d) => d.online);
+  if (firstOnline) {
+    deviceSelect.value = firstOnline.deviceId;
+    await connectToDevice(firstOnline.deviceId);
+  } else {
+    status("No online devices. Pick a device and retry.");
+    connectBtn.classList.remove("hidden");
+  }
+
+  deviceSelect.onchange = async () => {
+    const selectedId = deviceSelect.value;
+    if (selectedId === deviceId) return;
+    const selected = devices.find((d) => d.deviceId === selectedId);
+    if (!selected || !selected.online) {
+      status("Selected device is offline");
+      deviceSelect.value = deviceId || "";
+      return;
+    }
+    await connectToDevice(selected.deviceId);
+  };
+
+  connectBtn.onclick = async () => {
+    const selected = devices.find((d) => d.deviceId === deviceSelect.value);
+    if (!selected) {
+      status("Select a device");
+      return;
+    }
+    if (!selected.online) {
+      status("Selected device is offline");
+      return;
+    }
+    await connectToDevice(selected.deviceId);
+  };
+}
+
+async function connectToDevice(targetDeviceId) {
+  if (!targetDeviceId) return;
+
+  const selected = devices.find((d) => d.deviceId === targetDeviceId);
+  status(`Connecting to ${selected?.name || targetDeviceId}...`);
+
+  if (mqttClient) mqttClient.end();
+  deviceId = targetDeviceId;
+  connectBtn.classList.add("hidden");
+
+  await connectMqtt(accessToken, deviceId);
+
+  if (!hasMultipleDevices) {
+    deviceSelect.classList.add("hidden");
+  }
+
+  status("Connected. Ready!");
+  publishCommand("status/request", {});
+  publishCommand("events/request", {});
+}
+
+function setupEditor() {
+  buildPalette();
+  alphaSlider.value = currentAlpha;
+  alphaValue.textContent = String(currentAlpha);
+
+  alphaSlider.oninput = (e) => {
+    currentAlpha = parseInt(e.target.value, 10);
+    alphaValue.textContent = String(currentAlpha);
+  };
+
+  drawFullGrid();
+
+  gridCanvas.addEventListener("mousedown", (e) => {
+    isDragging = true;
+    handlePaint(e);
+  });
+
+  gridCanvas.addEventListener("mousemove", (e) => {
+    if (isDragging) handlePaint(e);
+  });
+
+  gridCanvas.addEventListener("mouseup", () => {
+    isDragging = false;
+  });
+
+  gridCanvas.addEventListener("mouseleave", () => {
+    isDragging = false;
+  });
+
+  gridCanvas.addEventListener("touchstart", (e) => {
+    e.preventDefault();
+    isDragging = true;
+    handlePaint(e);
+  });
+
+  gridCanvas.addEventListener("touchmove", (e) => {
+    e.preventDefault();
+    if (isDragging) handlePaint(e);
+  });
+
+  gridCanvas.addEventListener("touchend", (e) => {
+    e.preventDefault();
+    isDragging = false;
+  });
+
+  sendBtn.onclick = async () => {
+    if (!accessToken) {
+      status("Missing access token");
       return;
     }
 
-    // Helper function to show editor UI after connection
-    async function connectAndShowEditor(selectedDevice) {
-      deviceId = selectedDevice.deviceId;
-      status(`Connecting to ${selectedDevice.name}...`);
-      await connectMqtt(accessToken, deviceId);
-      if (!hasMultipleDevices) {
-        deviceSelect.classList.add("hidden");
-      }
-      connectBtn.classList.add("hidden");
-      paletteDiv.style.display = "flex";
-      alphaSlider.parentElement.style.display = "flex";
-      gridCanvas.style.display = "block";
-      sendBtn.style.display = "block";
-      buildPalette();
-      initAlphaSlider();
-      drawFullGrid();
-      status("Connected. Ready!");
+    try {
+      status("Uploading icon to Yoto...");
+      const iconBlob = await renderIconBlob();
+      const { fullUrl } = await uploadIconToYoto(iconBlob, accessToken);
+      publishCommand("display/preview", {
+        uri: fullUrl,
+        timeout: 30,
+        animated: 0,
+      });
+    } catch (err) {
+      console.error(err);
+      status("Yoto upload error - see console");
     }
+  };
+}
 
-    // Helper function for device switch
-    async function handleDeviceSwitch() {
-      const newId = deviceSelect.value;
-      if (newId === deviceId) return;
+function setupControls() {
+  refreshStatusBtn.onclick = () => publishCommand("status/request", {});
+  refreshEventsBtn.onclick = () => publishCommand("events/request", {});
 
-      const newDevice = devices.find((d) => d.deviceId === newId);
-      if (!newDevice.online) {
-        status("Selected device is offline");
-        deviceSelect.value = deviceId;
-        return;
-      }
+  volumeSlider.oninput = () => {
+    volumeValue.textContent = volumeSlider.value;
+  };
 
-      if (mqttClient) mqttClient.end();
-      await connectAndShowEditor(newDevice);
-    }
+  setVolumeBtn.onclick = () => {
+    const volume = Number(volumeSlider.value);
+    publishCommand("volume/set", { volume });
+  };
 
-    // Populate dropdown
-    devices.forEach((d) => {
-      const option = document.createElement("option");
-      option.value = d.deviceId;
-      option.textContent = `${d.name} (${d.online ? "Online" : "Offline"})`;
-      deviceSelect.appendChild(option);
+  setSleepBtn.onclick = () => {
+    const seconds = Math.max(0, Number(sleepSeconds.value || 0));
+    publishCommand("sleep-timer/set", { duration: seconds });
+  };
+
+  clearSleepBtn.onclick = () => {
+    publishCommand("sleep-timer/set", { duration: 0 });
+  };
+
+  setAmbientBtn.onclick = () => {
+    publishCommand("ambients/set", {
+      color: hexToRgb(ambientColor.value),
+      enabled: true,
     });
+  };
 
-    const onlineDevices = devices.filter((d) => d.online);
-    const hasMultipleDevices = devices.length > 1;
-
-    if (!hasMultipleDevices) {
-      // Single device case
-      const singleDevice = devices[0];
-      if (singleDevice.online) {
-        await connectAndShowEditor(singleDevice);
-      } else {
-        deviceSelect.classList.remove("hidden");
-        connectBtn.classList.remove("hidden");
-      }
-    } else {
-      // Multiple devices case
-      deviceSelect.classList.remove("hidden");
-
-      if (onlineDevices.length > 0) {
-        const firstOnline = onlineDevices[0];
-        deviceSelect.value = firstOnline.deviceId;
-        await connectAndShowEditor(firstOnline);
-        deviceSelect.onchange = handleDeviceSwitch;
-      } else {
-        connectBtn.classList.remove("hidden");
-      }
-    }
-
-    // Manual connect button handler
-    connectBtn.onclick = async () => {
-      const selectedId = deviceSelect.value;
-      if (!selectedId) {
-        status("Select a device");
-        return;
-      }
-
-      const selectedDevice = devices.find((d) => d.deviceId === selectedId);
-      if (!selectedDevice.online) {
-        status("Selected device is offline");
-        return;
-      }
-
-      await connectAndShowEditor(selectedDevice);
+  cardStartBtn.onclick = () => {
+    const payload = {
+      uri: cardUri.value.trim(),
+      anyButtonStop: anyButtonStop.checked,
     };
 
-    appDiv.classList.remove("hidden");
-  } catch (err) {
-    console.error(err);
-    status("Error fetching device info – see console");
-  }
-});
+    if (chapterKey.value.trim()) payload.chapterKey = chapterKey.value.trim();
+    if (trackKey.value.trim()) payload.trackKey = trackKey.value.trim();
 
-/* ---------- Palette + Drawing ---------- */
+    const seconds = Number(secondsIn.value);
+    if (!Number.isNaN(seconds) && secondsIn.value !== "") payload.secondsIn = seconds;
+
+    const cut = Number(cutOff.value);
+    if (!Number.isNaN(cut) && cutOff.value !== "") payload.cutOff = cut;
+
+    if (!payload.uri) {
+      status("Card URI is required for start");
+      return;
+    }
+
+    publishCommand("card/start", payload);
+  };
+
+  cardPauseBtn.onclick = () => publishCommand("card/pause", {});
+  cardResumeBtn.onclick = () => publishCommand("card/resume", {});
+  cardStopBtn.onclick = () => publishCommand("card/stop", {});
+
+  bluetoothOnBtn.onclick = () => {
+    publishCommand("bluetooth/on", safeJson(bluetoothOnPayload.value, {}));
+  };
+  bluetoothOffBtn.onclick = () => publishCommand("bluetooth/off", {});
+  bluetoothStateBtn.onclick = () => publishCommand("bluetooth/state", {});
+  bluetoothConnectBtn.onclick = () => {
+    publishCommand(
+      "bluetooth/connect",
+      safeJson(bluetoothConnectPayload.value, {})
+    );
+  };
+  bluetoothDisconnectBtn.onclick = () =>
+    publishCommand("bluetooth/disconnect", {});
+  bluetoothDeleteBondsBtn.onclick = () =>
+    publishCommand("bluetooth/delete-bonds", {});
+
+  rebootBtn.onclick = () => publishCommand("reboot", {});
+}
+
 function buildPalette() {
+  paletteDiv.innerHTML = "";
   PALETTE_COLORS.forEach((hex) => {
     const swatch = document.createElement("div");
     swatch.className = "swatch";
@@ -180,22 +348,14 @@ function buildPalette() {
   });
 }
 
-function initAlphaSlider() {
-  alphaSlider.value = currentAlpha;
-  alphaValue.textContent = currentAlpha;
-  alphaSlider.addEventListener("input", (e) => {
-    currentAlpha = parseInt(e.target.value, 10);
-    alphaValue.textContent = currentAlpha;
-  });
-}
-
 function getCellCoords(e) {
   const rect = gridCanvas.getBoundingClientRect();
-  const clientX = e.clientX || (e.touches && e.touches[0].clientX) || 0;
-  const clientY = e.clientY || (e.touches && e.touches[0].clientY) || 0;
-  const x = Math.floor((clientX - rect.left) / CELL_PX);
-  const y = Math.floor((clientY - rect.top) / CELL_PX);
-  return { x, y };
+  const clientX = e.clientX || (e.touches && e.touches[0]?.clientX) || 0;
+  const clientY = e.clientY || (e.touches && e.touches[0]?.clientY) || 0;
+  return {
+    x: Math.floor((clientX - rect.left) / CELL_PX),
+    y: Math.floor((clientY - rect.top) / CELL_PX),
+  };
 }
 
 function handlePaint(e) {
@@ -205,43 +365,8 @@ function handlePaint(e) {
   drawCell(x, y);
 }
 
-// Mouse events
-gridCanvas.addEventListener("mousedown", (e) => {
-  isDragging = true;
-  handlePaint(e);
-});
-
-gridCanvas.addEventListener("mousemove", (e) => {
-  if (isDragging) handlePaint(e);
-});
-
-gridCanvas.addEventListener("mouseup", () => {
-  isDragging = false;
-});
-
-gridCanvas.addEventListener("mouseleave", () => {
-  isDragging = false;
-});
-
-// Touch events
-gridCanvas.addEventListener("touchstart", (e) => {
-  e.preventDefault();
-  isDragging = true;
-  handlePaint(e);
-});
-
-gridCanvas.addEventListener("touchmove", (e) => {
-  e.preventDefault();
-  if (isDragging) handlePaint(e);
-});
-
-gridCanvas.addEventListener("touchend", (e) => {
-  e.preventDefault();
-  isDragging = false;
-});
-
 function setPixel(x, y) {
-  const alphaHex = currentAlpha.toString(16).padStart(2, '0').toUpperCase();
+  const alphaHex = currentAlpha.toString(16).padStart(2, "0").toUpperCase();
   pixelData[y * GRID_SIZE + x] = currentRGB + alphaHex;
 }
 
@@ -251,11 +376,39 @@ function drawCell(x, y) {
 }
 
 function drawFullGrid() {
-  for (let y = 0; y < GRID_SIZE; y++) {
-    for (let x = 0; x < GRID_SIZE; x++) {
+  for (let y = 0; y < GRID_SIZE; y += 1) {
+    for (let x = 0; x < GRID_SIZE; x += 1) {
       drawCell(x, y);
     }
   }
+}
+
+async function renderIconBlob() {
+  const smallCanvas = document.createElement("canvas");
+  smallCanvas.width = GRID_SIZE;
+  smallCanvas.height = GRID_SIZE;
+  const smallCtx = smallCanvas.getContext("2d");
+  smallCtx.drawImage(
+    gridCanvas,
+    0,
+    0,
+    gridCanvas.width,
+    gridCanvas.height,
+    0,
+    0,
+    smallCanvas.width,
+    smallCanvas.height
+  );
+
+  return new Promise((resolve, reject) => {
+    smallCanvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error("Failed to convert icon to blob"));
+        return;
+      }
+      resolve(blob);
+    }, "image/png");
+  });
 }
 
 async function uploadIconToYoto(iconBlob, token) {
@@ -278,107 +431,44 @@ async function uploadIconToYoto(iconBlob, token) {
   }
 
   const uploadResult = await res.json();
-
-  const displayIcon = uploadResult?.displayIcon || {};
-  const fullUrl = displayIcon.url;
+  const fullUrl = uploadResult?.displayIcon?.url;
   if (!fullUrl) throw new Error("No icon URL returned from Yoto upload");
 
   return { fullUrl };
 }
 
-/* ---------- Send Button ---------- */
-sendBtn.addEventListener("click", async () => {
-  if (!mqttClient || !mqttClient.connected) {
-    status("MQTT not connected");
-    return;
-  }
-  if (!accessToken) {
-    status("Missing access token");
-    return;
-  }
-
-  status("Uploading icon to Yoto...");
-  try {
-    const smallCanvas = document.createElement("canvas");
-    smallCanvas.width = GRID_SIZE;
-    smallCanvas.height = GRID_SIZE;
-    const smallCtx = smallCanvas.getContext("2d");
-
-    smallCtx.drawImage(
-      gridCanvas,
-      0,
-      0,
-      gridCanvas.width,
-      gridCanvas.height,
-      0,
-      0,
-      smallCanvas.width,
-      smallCanvas.height
-    );
-
-    const iconBlob = await new Promise((resolve, reject) => {
-      smallCanvas.toBlob((blob) => {
-        if (!blob) reject(new Error("Failed to convert icon to blob"));
-        else resolve(blob);
-      }, "image/png");
-    });
-
-    const { fullUrl } = await uploadIconToYoto(iconBlob, accessToken);
-    const uri = fullUrl;
-
-    const payload = JSON.stringify({
-      uri,
-      timeout: 30,
-      animated: 0,
-    });
-    const topic = `device/${deviceId}/command/display/preview`;
-
-    mqttClient.publish(topic, payload, { qos: 0 }, (err) => {
-      if (err) {
-        console.error(err);
-        status("Publish error");
-      } else {
-        status("Preview sent!");
-      }
-    });
-  } catch (err) {
-    console.error(err);
-    status("Yoto upload error – see console");
-  }
-});
-
-/* ---------- MQTT ---------- */
-function connectMqtt(accessToken, deviceId) {
+function connectMqtt(token, targetDeviceId) {
   return new Promise((resolve, reject) => {
-    status("Connecting to MQTT...");
-    const clientId = `DASH${deviceId}`;
-
     mqttClient = mqtt.connect(MQTT_URL, {
       keepalive: KEEPALIVE,
       port: 443,
       protocol: "wss",
-      username: `${deviceId}?x-amz-customauthorizer-name=PublicJWTAuthorizer`,
-      password: accessToken,
+      username: `${targetDeviceId}?x-amz-customauthorizer-name=PublicJWTAuthorizer`,
+      password: token,
       reconnectPeriod: 0,
-      clientId,
+      clientId: `DASH${targetDeviceId}`,
       ALPNProtocols: ["x-amzn-mqtt-ca"],
     });
 
     mqttClient.on("connect", () => {
       const topics = [
-        `device/${deviceId}/events`,
-        `device/${deviceId}/status`,
-        `device/${deviceId}/response`,
+        `device/${targetDeviceId}/data/events`,
+        `device/${targetDeviceId}/data/status`,
+        `device/${targetDeviceId}/response`,
       ];
+
       mqttClient.subscribe(topics, { qos: 0 }, (err) => {
-        if (err) console.error("MQTT subscribe error", err);
+        if (err) {
+          console.error("MQTT subscribe error", err);
+          reject(err);
+          return;
+        }
+        resolve();
       });
-      resolve();
     });
 
-    mqttClient.on("message", (topic) => {
-      const [, topicDeviceId] = topic.split("/");
-      if (topicDeviceId !== deviceId) return;
+    mqttClient.on("message", (topic, message) => {
+      onMqttMessage(topic, message);
     });
 
     mqttClient.on("error", (err) => {
@@ -387,6 +477,83 @@ function connectMqtt(accessToken, deviceId) {
       reject(err);
     });
   });
+}
+
+function onMqttMessage(topic, message) {
+  let payload;
+  try {
+    payload = JSON.parse(message.toString());
+  } catch (err) {
+    payload = { raw: message.toString(), parseError: String(err) };
+  }
+
+  if (topic.endsWith("/data/events")) {
+    eventsJson.textContent = prettyJson(payload);
+    return;
+  }
+
+  if (topic.endsWith("/data/status")) {
+    statusJson.textContent = prettyJson(payload);
+    syncUiFromStatus(payload);
+    return;
+  }
+
+  if (topic.endsWith("/response")) {
+    responseJson.textContent = prettyJson(payload);
+    return;
+  }
+}
+
+function syncUiFromStatus(payload) {
+  const maybeVolume = payload?.state?.volume ?? payload?.volume;
+  if (typeof maybeVolume === "number") {
+    volumeSlider.value = String(Math.max(0, Math.min(100, maybeVolume)));
+    volumeValue.textContent = volumeSlider.value;
+  }
+}
+
+function publishCommand(command, body) {
+  if (!mqttClient || !mqttClient.connected || !deviceId) {
+    status("MQTT not connected");
+    return;
+  }
+
+  const topic = `device/${deviceId}/command/${command}`;
+  const request = {
+    requestId: crypto.randomUUID(),
+    ...body,
+  };
+
+  mqttClient.publish(topic, JSON.stringify(request), { qos: 0 }, (err) => {
+    if (err) {
+      console.error("Publish error", err);
+      status(`Publish failed: ${command}`);
+      return;
+    }
+    status(`Published ${command}`);
+  });
+}
+
+function hexToRgb(hex) {
+  const stripped = hex.replace("#", "");
+  return {
+    r: parseInt(stripped.slice(0, 2), 16),
+    g: parseInt(stripped.slice(2, 4), 16),
+    b: parseInt(stripped.slice(4, 6), 16),
+  };
+}
+
+function safeJson(raw, fallback) {
+  try {
+    return raw.trim() ? JSON.parse(raw) : fallback;
+  } catch {
+    status("Invalid JSON payload");
+    return fallback;
+  }
+}
+
+function prettyJson(value) {
+  return JSON.stringify(value, null, 2);
 }
 
 function status(msg) {

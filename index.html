@@ -2,34 +2,141 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Yoto Matrix Preview</title>
+    <title>Yoto Control Center</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="style.css" />
   </head>
-
   <body>
-    <h1>Yoto Matrix Preview</h1>
-
-    <!-- Visible only when no valid access token -->
-    <button id="loginBtn" class="hidden">Log in with Yoto</button>
-
-    <!-- Main application UI (hidden until device + MQTT ready) -->
-    <div id="app" class="hidden">
-      <select id="deviceSelect" class="hidden"></select>
-      <button id="connectBtn" class="hidden">Connect to Device</button>
-      <div id="palette"></div>
-      <div id="alphaContainer">
-        Alpha: <input type="range" id="alphaSlider" min="0" max="255" value="255">
-        <span id="alphaValue">255</span>
+    <header class="topbar">
+      <div>
+        <h1>Yoto Control Center</h1>
+        <p class="subtitle">Live device status, playback controls, and matrix preview</p>
       </div>
-      <canvas id="grid" width="320" height="320"></canvas>
-      <button id="sendBtn">Send to Device</button>
-      <p id="status"></p>
-    </div>
+      <button id="loginBtn" class="hidden">Log in with Yoto</button>
+    </header>
 
-    <!-- mqtt.js browser bundle -->
+    <main id="app" class="app-shell hidden">
+      <section class="card device-card">
+        <h2>Device</h2>
+        <div class="device-row">
+          <label for="deviceSelect">Target</label>
+          <select id="deviceSelect"></select>
+          <button id="connectBtn" class="hidden">Connect</button>
+          <button id="refreshStatusBtn">Request Status</button>
+          <button id="refreshEventsBtn">Request Events</button>
+        </div>
+        <p id="status" class="status"></p>
+      </section>
+
+      <section class="card grid-card">
+        <h2>Matrix Preview</h2>
+        <div id="palette"></div>
+        <div id="alphaContainer">
+          <label for="alphaSlider">Alpha</label>
+          <input type="range" id="alphaSlider" min="0" max="255" value="255" />
+          <span id="alphaValue">255</span>
+        </div>
+        <canvas id="grid" width="320" height="320"></canvas>
+        <div class="actions">
+          <button id="sendBtn">Send Display Preview</button>
+        </div>
+      </section>
+
+      <section class="card controls-card">
+        <h2>Device Controls</h2>
+
+        <div class="control-group">
+          <h3>Volume</h3>
+          <div class="inline-fields">
+            <input type="range" id="volumeSlider" min="0" max="100" value="25" />
+            <span id="volumeValue">25</span>
+            <button id="setVolumeBtn">Set Volume</button>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <h3>Sleep Timer</h3>
+          <div class="inline-fields">
+            <input type="number" id="sleepSeconds" min="0" step="1" value="0" />
+            <button id="setSleepBtn">Set Sleep Timer</button>
+            <button id="clearSleepBtn">Disable</button>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <h3>Ambients</h3>
+          <div class="inline-fields">
+            <input type="color" id="ambientColor" value="#ff8800" />
+            <button id="setAmbientBtn">Set Ambients</button>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <h3>Card Playback</h3>
+          <div class="stack-fields">
+            <input id="cardUri" placeholder="Card URI (e.g. https://yoto.io/...)" />
+            <div class="inline-fields">
+              <input id="chapterKey" placeholder="chapterKey (optional)" />
+              <input id="trackKey" placeholder="trackKey (optional)" />
+            </div>
+            <div class="inline-fields">
+              <input id="secondsIn" type="number" min="0" step="1" placeholder="secondsIn" />
+              <input id="cutOff" type="number" min="0" step="1" placeholder="cutOff" />
+            </div>
+            <label class="checkbox"><input id="anyButtonStop" type="checkbox" /> anyButtonStop</label>
+            <div class="inline-fields">
+              <button id="cardStartBtn">Start</button>
+              <button id="cardPauseBtn">Pause</button>
+              <button id="cardResumeBtn">Resume</button>
+              <button id="cardStopBtn">Stop</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <h3>Bluetooth</h3>
+          <div class="stack-fields">
+            <textarea id="bluetoothOnPayload" rows="3">{"action":"on","mode":true}</textarea>
+            <textarea id="bluetoothConnectPayload" rows="2">{}</textarea>
+            <div class="inline-fields wrap">
+              <button id="bluetoothOnBtn">Bluetooth On</button>
+              <button id="bluetoothOffBtn">Bluetooth Off</button>
+              <button id="bluetoothStateBtn">State</button>
+              <button id="bluetoothConnectBtn">Connect</button>
+              <button id="bluetoothDisconnectBtn">Disconnect</button>
+              <button id="bluetoothDeleteBondsBtn">Delete Bonds</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <h3>System</h3>
+          <div class="inline-fields">
+            <button id="rebootBtn" class="danger">Reboot Device</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card feed-card">
+        <h2>MQTT Feed</h2>
+        <div class="status-grid">
+          <article>
+            <h3>Events (/data/events)</h3>
+            <pre id="eventsJson">No events yet</pre>
+          </article>
+          <article>
+            <h3>Status (/data/status)</h3>
+            <pre id="statusJson">No status yet</pre>
+          </article>
+          <article>
+            <h3>Responses (/response)</h3>
+            <pre id="responseJson">No responses yet</pre>
+          </article>
+        </div>
+      </section>
+    </main>
+
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
-    <!-- Authentication + App logic -->
     <script src="auth.js"></script>
     <script src="app.js"></script>
   </body>
