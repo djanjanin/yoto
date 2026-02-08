@@ -5,8 +5,7 @@
 const API_ME = "https://api.yotoplay.com/device-v2/devices/mine";
 const MQTT_URL = "wss://aqrphjqbp3u2z-ats.iot.eu-west-2.amazonaws.com";
 const KEEPALIVE = 300;
-const IMGBB_URL = "https://api.imgbb.com/1/upload";
-const IMGBB_KEY = "5c0ffd4498be915245e46f95256cdc78";
+const ICON_UPLOAD_URL = "https://api.yotoplay.com/media/displayIcons/user/me/upload";
 
 const PALETTE_COLORS = [
   "#000000",
@@ -26,16 +25,12 @@ const PALETTE_COLORS = [
 const GRID_SIZE = 16; // 16×16
 const CELL_PX = 20; // canvas scaling
 
-/* ---------- Debug helper ---------- */
-const DEBUG = true;
-function dbg(...args) {
-  if (DEBUG) console.log(...args);
-}
 let currentRGB = PALETTE_COLORS[2]; // default red
 let currentAlpha = 255; // 0-255
 let pixelData = new Array(GRID_SIZE * GRID_SIZE).fill("#000000FF"); // 8-digit hex #RRGGBBAA
 let deviceId = null;
 let mqttClient = null;
+let accessToken = null;
 let isDragging = false;
 
 /* ---------- DOM refs ---------- */
@@ -54,9 +49,9 @@ const statusP = document.getElementById("status");
 /* ---------- Init Flow ---------- */
 window.addEventListener("load", async () => {
   await auth.completeAuth(); // handle ?code=
-  const token = await auth.getValidAccessToken();
+  accessToken = await auth.getValidAccessToken();
 
-  if (!token) {
+  if (!accessToken) {
     loginBtn.classList.remove("hidden");
     loginBtn.onclick = auth.startAuth;
     return;
@@ -65,10 +60,9 @@ window.addEventListener("load", async () => {
   status("Fetching device info...");
   try {
     const res = await fetch(API_ME, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
     const { devices } = await res.json();
-    dbg("Devices array", devices);
 
     if (!devices || devices.length === 0) {
       status("No devices found on your account");
@@ -79,7 +73,7 @@ window.addEventListener("load", async () => {
     async function connectAndShowEditor(selectedDevice) {
       deviceId = selectedDevice.deviceId;
       status(`Connecting to ${selectedDevice.name}...`);
-      await connectMqtt(token, deviceId);
+      await connectMqtt(accessToken, deviceId);
       if (!hasMultipleDevices) {
         deviceSelect.classList.add("hidden");
       }
@@ -99,7 +93,7 @@ window.addEventListener("load", async () => {
       const newId = deviceSelect.value;
       if (newId === deviceId) return;
 
-      const newDevice = devices.find(d => d.deviceId === newId);
+      const newDevice = devices.find((d) => d.deviceId === newId);
       if (!newDevice.online) {
         status("Selected device is offline");
         deviceSelect.value = deviceId;
@@ -118,7 +112,7 @@ window.addEventListener("load", async () => {
       deviceSelect.appendChild(option);
     });
 
-    const onlineDevices = devices.filter(d => d.online);
+    const onlineDevices = devices.filter((d) => d.online);
     const hasMultipleDevices = devices.length > 1;
 
     if (!hasMultipleDevices) {
@@ -152,7 +146,7 @@ window.addEventListener("load", async () => {
         return;
       }
 
-      const selectedDevice = devices.find(d => d.deviceId === selectedId);
+      const selectedDevice = devices.find((d) => d.deviceId === selectedId);
       if (!selectedDevice.online) {
         status("Selected device is offline");
         return;
@@ -177,7 +171,9 @@ function buildPalette() {
     if (hex === currentRGB) swatch.classList.add("active");
     swatch.onclick = () => {
       currentRGB = hex;
-      document.querySelectorAll(".swatch").forEach((el) => el.classList.remove("active"));
+      document
+        .querySelectorAll(".swatch")
+        .forEach((el) => el.classList.remove("active"));
       swatch.classList.add("active");
     };
     paletteDiv.appendChild(swatch);
@@ -188,7 +184,7 @@ function initAlphaSlider() {
   alphaSlider.value = currentAlpha;
   alphaValue.textContent = currentAlpha;
   alphaSlider.addEventListener("input", (e) => {
-    currentAlpha = parseInt(e.target.value);
+    currentAlpha = parseInt(e.target.value, 10);
     alphaValue.textContent = currentAlpha;
   });
 }
@@ -213,7 +209,6 @@ function handlePaint(e) {
 gridCanvas.addEventListener("mousedown", (e) => {
   isDragging = true;
   handlePaint(e);
-  dbg("Drag start (mouse)");
 });
 
 gridCanvas.addEventListener("mousemove", (e) => {
@@ -222,7 +217,6 @@ gridCanvas.addEventListener("mousemove", (e) => {
 
 gridCanvas.addEventListener("mouseup", () => {
   isDragging = false;
-  dbg("Drag end (mouse)");
 });
 
 gridCanvas.addEventListener("mouseleave", () => {
@@ -234,7 +228,6 @@ gridCanvas.addEventListener("touchstart", (e) => {
   e.preventDefault();
   isDragging = true;
   handlePaint(e);
-  dbg("Drag start (touch)");
 });
 
 gridCanvas.addEventListener("touchmove", (e) => {
@@ -245,7 +238,6 @@ gridCanvas.addEventListener("touchmove", (e) => {
 gridCanvas.addEventListener("touchend", (e) => {
   e.preventDefault();
   isDragging = false;
-  dbg("Drag end (touch)");
 });
 
 function setPixel(x, y) {
@@ -266,38 +258,73 @@ function drawFullGrid() {
   }
 }
 
+async function uploadIconToYoto(iconBlob, token) {
+  const uploadUrl = new URL(ICON_UPLOAD_URL);
+  uploadUrl.searchParams.set("autoConvert", "true");
+  uploadUrl.searchParams.set("filename", "matrix-icon.png");
+
+  const res = await fetch(uploadUrl.toString(), {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": iconBlob.type || "image/png",
+    },
+    body: iconBlob,
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Yoto icon upload failed: ${res.status} ${errText}`);
+  }
+
+  const uploadResult = await res.json();
+
+  const displayIcon = uploadResult?.displayIcon || {};
+  const fullUrl = displayIcon.url;
+  if (!fullUrl) throw new Error("No icon URL returned from Yoto upload");
+
+  return { fullUrl };
+}
+
 /* ---------- Send Button ---------- */
 sendBtn.addEventListener("click", async () => {
   if (!mqttClient || !mqttClient.connected) {
     status("MQTT not connected");
     return;
   }
+  if (!accessToken) {
+    status("Missing access token");
+    return;
+  }
 
-  status("Uploading icon...");
+  status("Uploading icon to Yoto...");
   try {
     const smallCanvas = document.createElement("canvas");
     smallCanvas.width = GRID_SIZE;
     smallCanvas.height = GRID_SIZE;
     const smallCtx = smallCanvas.getContext("2d");
 
-    smallCtx.drawImage(gridCanvas, 0, 0, gridCanvas.width, gridCanvas.height, 0, 0, smallCanvas.width, smallCanvas.height);
+    smallCtx.drawImage(
+      gridCanvas,
+      0,
+      0,
+      gridCanvas.width,
+      gridCanvas.height,
+      0,
+      0,
+      smallCanvas.width,
+      smallCanvas.height
+    );
 
-    const base64 = smallCanvas.toDataURL("image/png").split(",")[1];
-
-    const formData = new FormData();
-    formData.append("key", IMGBB_KEY);
-    formData.append("image", base64);
-
-    const res = await fetch(IMGBB_URL, {
-      method: "POST",
-      body: formData,
+    const iconBlob = await new Promise((resolve, reject) => {
+      smallCanvas.toBlob((blob) => {
+        if (!blob) reject(new Error("Failed to convert icon to blob"));
+        else resolve(blob);
+      }, "image/png");
     });
 
-    if (!res.ok) throw new Error("Upload failed");
-
-    const { data } = await res.json();
-    const uri = data.display_url;
-    dbg("Uploaded URI", uri);
+    const { fullUrl } = await uploadIconToYoto(iconBlob, accessToken);
+    const uri = fullUrl;
 
     const payload = JSON.stringify({
       uri,
@@ -316,7 +343,7 @@ sendBtn.addEventListener("click", async () => {
     });
   } catch (err) {
     console.error(err);
-    status("Upload error – see console");
+    status("Yoto upload error – see console");
   }
 });
 
@@ -338,29 +365,20 @@ function connectMqtt(accessToken, deviceId) {
     });
 
     mqttClient.on("connect", () => {
-      dbg("MQTT connected");
       const topics = [
         `device/${deviceId}/events`,
         `device/${deviceId}/status`,
         `device/${deviceId}/response`,
       ];
       mqttClient.subscribe(topics, { qos: 0 }, (err) => {
-        if (err) {
-          dbg("Subscribe error", err);
-        } else {
-          dbg("Subscribed to topics", topics);
-        }
+        if (err) console.error("MQTT subscribe error", err);
       });
       resolve();
     });
 
-    mqttClient.on("message", (topic, message) => {
-      const [base, device, messageType] = topic.split("/");
-
-      if (device === deviceId) {
-        const payload = JSON.parse(message.toString());
-        dbg(`Received ${messageType}`, payload);
-      }
+    mqttClient.on("message", (topic) => {
+      const [, topicDeviceId] = topic.split("/");
+      if (topicDeviceId !== deviceId) return;
     });
 
     mqttClient.on("error", (err) => {
@@ -369,16 +387,6 @@ function connectMqtt(accessToken, deviceId) {
       reject(err);
     });
   });
-}
-
-/* ---------- Helpers ---------- */
-function hexToRgbTriplet(hex) {
-  const h = hex.replace("#", "");
-  return [
-    parseInt(h.substr(0, 2), 16),
-    parseInt(h.substr(2, 2), 16),
-    parseInt(h.substr(4, 2), 16),
-  ];
 }
 
 function status(msg) {
